@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced Web Painter</title>
+    <link rel="stylesheet" href="style.css"> 
+</head>
+<body>
+
+    <h1>Web Painter</h1>
+
+    <div class="main-content">
+        <div class="toolbar">
+            <label for="colorPicker">色:</label>
+            <input type="color" id="colorPicker" value="#e94560">
+            
+            <label for="sizeSlider">太さ:</label>
+            <input type="range" id="sizeSlider" min="1" max="50" value="5">
+            
+            <button id="drawModeBtn" class="active">ペン
+            <button id="eraserModeBtn">消しゴム</button>
+            <button id="clearButton">すべて消去</button>
+            <button id="saveButton">画像保存 (PNG)</button>
+        </div>
+
+        <div class="drawing-area">
+            <div class="canvas-container" id="canvasContainer">
+                </div>
+
+            <div class="layer-panel">
+                <h2>レイヤー</h2>
+                <div class="layer-list" id="layerList">
+                    </div>
+                <div class="layer-controls">
+                    <button id="addLayerBtn">+ レイヤー追加</button>
+                    <button id="removeLayerBtn" disabled>- レイヤー削除</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script> 
+</body>
+</html>
