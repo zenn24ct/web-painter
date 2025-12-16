@@ -1,45 +1,38 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Advanced Web Painter</title>
-    <link rel="stylesheet" href="style.css"> 
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Web Painter — Minimal</title>
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-
+  <header>
     <h1>Web Painter</h1>
+  </header>
 
-    <div class="main-content">
-        <div class="toolbar">
-            <label for="colorPicker">色:</label>
-            <input type="color" id="colorPicker" value="#e94560">
-            
-            <label for="sizeSlider">太さ:</label>
-            <input type="range" id="sizeSlider" min="1" max="50" value="5">
-            
-            <button id="drawModeBtn" class="active">ペン
-            <button id="eraserModeBtn">消しゴム</button>
-            <button id="clearButton">すべて消去</button>
-            <button id="saveButton">画像保存 (PNG)</button>
-        </div>
+  <section class="toolbar">
+    <label>色 <input id="colorPicker" type="color" value="#e94560"></label>
+    <label>太さ <input id="sizeSlider" type="range" min="1" max="60" value="5"></label>
+    <button id="penBtn" class="active">ペン</button>
+    <button id="eraserBtn">消しゴム</button>
+    <button id="addLayerBtn">+ レイヤー</button>
+    <button id="removeLayerBtn" disabled>− レイヤー</button>
+    <button id="clearBtn">クリア</button>
+    <input id="fileInput" type="file" accept="image/*" style="display:none">
+    <button id="addImageBtn">画像追加</button>
+    <button id="saveBtn">PNG保存</button>
+  </section>
 
-        <div class="drawing-area">
-            <div class="canvas-container" id="canvasContainer">
-                </div>
+  <main class="workspace">
+    <div id="canvasContainer" class="canvas-container"></div>
 
-            <div class="layer-panel">
-                <h2>レイヤー</h2>
-                <div class="layer-list" id="layerList">
-                    </div>
-                <div class="layer-controls">
-                    <button id="addLayerBtn">+ レイヤー追加</button>
-                    <button id="removeLayerBtn" disabled>- レイヤー削除</button>
-                </div>
-            </div>
-        </div>
-    </div>
+    <aside class="layer-panel">
+      <h2>レイヤー</h2>
+      <div id="layerList" class="layer-list"></div>
+    </aside>
+  </main>
 
-    <script src="script.js"></script> 
+  <script src="script.js" defer></script>
 </body>
 </html>

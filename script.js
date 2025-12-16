@@ -1,311 +1,294 @@
-// --- JavaScript ロジック ---
+// Minimal, working painter with multiple canvas layers.
+// Features: add/remove/select layer, draw/erase on active layer, paste image to active layer, save PNG.
+// Keep code minimal and clear.
 
-const canvasContainer = document.getElementById('canvasContainer');
+const CANVAS_CONTAINER = document.getElementById('canvasContainer');
 const colorPicker = document.getElementById('colorPicker');
 const sizeSlider = document.getElementById('sizeSlider');
-const clearButton = document.getElementById('clearButton');
-const saveButton = document.getElementById('saveButton');
-const drawModeBtn = document.getElementById('drawModeBtn');
-const eraserModeBtn = document.getElementById('eraserModeBtn');
+const penBtn = document.getElementById('penBtn');
+const eraserBtn = document.getElementById('eraserBtn');
 const addLayerBtn = document.getElementById('addLayerBtn');
 const removeLayerBtn = document.getElementById('removeLayerBtn');
-const layerList = document.getElementById('layerList');
+const clearBtn = document.getElementById('clearBtn');
+const saveBtn = document.getElementById('saveBtn');
+const fileInput = document.getElementById('fileInput');
+const addImageBtn = document.getElementById('addImageBtn');
 
-// --- 描画状態とレイヤー管理 ---
-let isDrawing = false;
-let lastX = 0;
-let lastY = 0;
-let drawMode = 'draw'; // 'draw' or 'erase'
+const layerListEl = document.getElementById('layerList');
 
-let layers = []; // { id, canvas, ctx } のオブジェクト配列
-let activeLayerIndex = 0; // 現在描画対象となっているレイヤーのインデックス
+const DPR = window.devicePixelRatio || 1;
+let layers = []; // [{id, canvas, ctx, name}]
+let activeIndex = 0;
+let mode = 'draw'; // 'draw' or 'erase'
+let drawing = false;
+let last = {x:0,y:0};
 
-const CANVAS_BASE_SIZE = 600; // キャンバスの基準サイズ (px)
-
-// --- 初期化 ---
-
-// レイヤー管理構造
-class Layer {
-    constructor(id, name, width, height) {
-        this.id = id;
-        this.name = name;
-        this.canvas = document.createElement('canvas');
-        this.canvas.id = `layer_${id}`;
-        this.canvas.className = 'layer-canvas';
-        
-        // 高解像度ディスプレイ対応のためにスケールを設定
-        const scale = window.devicePixelRatio; 
-        this.canvas.width = width * scale;
-        this.canvas.height = height * scale;
-        this.canvas.style.width = width + 'px';
-        this.canvas.style.height = height + 'px';
-        
-        this.ctx = this.canvas.getContext('2d');
-        this.ctx.scale(scale, scale);
-        this.ctx.lineCap = 'round';
-        this.ctx.lineJoin = 'round';
-        
-        // レイヤー0 (一番下) は常に白背景
-        if (id === 0) {
-            this.ctx.fillStyle = '#fff';
-            this.ctx.fillRect(0, 0, width, height);
-            this.canvas.style.zIndex = 1;
-        } else {
-            this.canvas.style.zIndex = id + 10; // 操作レイヤーを上位に
-        }
-    }
+// Ensure container has size (CSS sets it), but track rect for canvas sizing
+function createCanvasElement(widthPx, heightPx){
+  const c = document.createElement('canvas');
+  // size in device pixels
+  c.width = Math.round(widthPx * DPR);
+  c.height = Math.round(heightPx * DPR);
+  c.style.width = widthPx + 'px';
+  c.style.height = heightPx + 'px';
+  const ctx = c.getContext('2d');
+  ctx.scale(DPR, DPR);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  return { canvas: c, ctx };
 }
 
-// キャンバスのサイズ設定 (固定サイズ)
-function setCanvasContainerSize() {
-    canvasContainer.style.width = CANVAS_BASE_SIZE + 'px';
-    canvasContainer.style.height = CANVAS_BASE_SIZE + 'px';
+function addLayer(name = `レイヤー ${layers.length}`){
+  const rect = CANVAS_CONTAINER.getBoundingClientRect();
+  const width = Math.max(10, Math.round(rect.width));
+  const height = Math.max(10, Math.round(rect.height));
+  const {canvas, ctx} = createCanvasElement(width, height);
+  canvas.className = 'layer-canvas';
+  canvas.dataset.layer = layers.length;
+  canvas.style.zIndex = layers.length; // stacking order
+  CANVAS_CONTAINER.appendChild(canvas);
+  layers.push({ id: layers.length, canvas, ctx, name });
+  setActiveLayer(layers.length - 1);
+  refreshLayerList();
+  removeLayerBtn.disabled = layers.length <= 1;
 }
 
-
-// レイヤーの追加
-function addLayer(name) {
-    const newId = layers.length;
-    const newLayer = new Layer(newId, name, CANVAS_BASE_SIZE, CANVAS_BASE_SIZE);
-    
-    layers.push(newLayer);
-    canvasContainer.appendChild(newLayer.canvas);
-    
-    // 新しいレイヤーをアクティブにする
-    setActiveLayer(newId);
-    updateLayerList();
-    
-    // レイヤーが複数になったら削除ボタンを有効化
-    if (layers.length > 1) {
-        removeLayerBtn.disabled = false;
-    }
+function removeLayer(index){
+  if(layers.length <= 1) return;
+  const L = layers[index];
+  CANVAS_CONTAINER.removeChild(L.canvas);
+  layers.splice(index,1);
+  // adjust zIndex and dataset
+  layers.forEach((l, i)=>{
+    l.canvas.dataset.layer = i;
+    l.canvas.style.zIndex = i;
+  });
+  if(activeIndex >= layers.length) activeIndex = layers.length -1;
+  setActiveLayer(activeIndex);
+  refreshLayerList();
+  removeLayerBtn.disabled = layers.length <= 1;
 }
 
-// レイヤーの削除
-function removeLayer() {
-    if (layers.length <= 1) return; 
-    
-    const layerToRemove = layers[activeLayerIndex];
-    
-    // DOMから削除
-    canvasContainer.removeChild(layerToRemove.canvas);
-    
-    // 配列から削除
-    layers.splice(activeLayerIndex, 1);
-    
-    // アクティブレイヤーを調整 (削除されたレイヤーのすぐ下のレイヤーを選択)
-    activeLayerIndex = Math.min(activeLayerIndex, layers.length - 1);
-    
-    setActiveLayer(layers[activeLayerIndex].id);
-    updateLayerList();
-
-    if (layers.length === 1) {
-        removeLayerBtn.disabled = true;
-    }
+function setActiveLayer(index){
+  if(index < 0 || index >= layers.length) return;
+  activeIndex = index;
+  layers.forEach((l,i)=>{
+    l.canvas.classList.toggle('active', i === activeIndex);
+  });
+  refreshLayerList();
 }
 
-
-// アクティブレイヤーの設定
-function setActiveLayer(id) {
-    const newIndex = layers.findIndex(l => l.id === id);
-    if (newIndex === -1) return;
-
-    activeLayerIndex = newIndex;
-    
-    // イベントリスナーの解除とクラスの調整
-    document.querySelectorAll('.layer-canvas').forEach(c => {
-        c.classList.remove('active');
-        // イベントはドキュメント全体で管理しているため、キャンバス単位のイベントリスナーは不要
+// Update layer list UI
+function refreshLayerList(){
+  layerListEl.innerHTML = '';
+  // show top-to-bottom (last array element is top)
+  for(let i = layers.length - 1; i >= 0; i--){
+    const li = document.createElement('div');
+    li.className = 'layer-item' + (i === activeIndex ? ' selected' : '');
+    li.textContent = layers[i].name;
+    li.addEventListener('click', ()=> {
+      // When clicked in list, index from top -> convert
+      const idxFromTop = i;
+      // array index is same as i here because we iterated from end; compute actual index:
+      const idx = i;
+      setActiveLayer(idx);
     });
-
-    // 新しいアクティブレイヤーに 'active' クラスを付与
-    const activeCanvas = layers[activeLayerIndex].canvas;
-    activeCanvas.classList.add('active');
-    
-    updateLayerList();
+    layerListEl.appendChild(li);
+  }
 }
 
-// レイヤーリストのUIを更新
-function updateLayerList() {
-    layerList.innerHTML = '';
-    
-    // リストは上から下へ描画されるため、レイヤー配列を逆順にして表示する (上が最前面)
-    layers.slice().reverse().forEach(layer => {
-        const item = document.createElement('div');
-        item.className = 'layer-item' + (layer.id === layers[activeLayerIndex].id ? ' selected' : '');
-        item.textContent = layer.name;
-        item.dataset.layerId = layer.id;
-        
-        item.addEventListener('click', () => setActiveLayer(layer.id));
-        layerList.appendChild(item);
-    });
+// Get pointer coords relative to active canvas (CSS pixels)
+function getLocalPos(e, canvas){
+  const rect = canvas.getBoundingClientRect();
+  const clientX = (e.clientX !== undefined) ? e.clientX : (e.touches && e.touches[0] && e.touches[0].clientX) || 0;
+  const clientY = (e.clientY !== undefined) ? e.clientY : (e.touches && e.touches[0] && e.touches[0].clientY) || 0;
+  return { x: clientX - rect.left, y: clientY - rect.top };
 }
 
-// 初期レイヤーの作成
-setCanvasContainerSize(); // サイズを確定
-addLayer('背景 (自動)');
-addLayer('レイヤー 1');
+// Drawing handlers (global)
+document.addEventListener('pointerdown', (e)=>{
+  const active = layers[activeIndex];
+  if(!active) return;
+  if(e.target !== active.canvas) return; // only draw when pointer is on active canvas
+  drawing = true;
+  last = getLocalPos(e, active.canvas);
+  e.preventDefault();
+});
+document.addEventListener('pointermove', (e)=>{
+  if(!drawing) return;
+  const active = layers[activeIndex];
+  if(!active) return;
+  const pos = getLocalPos(e, active.canvas);
+  const ctx = active.ctx;
+  ctx.lineWidth = Number(sizeSlider.value);
+  if(mode === 'draw'){
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.strokeStyle = colorPicker.value;
+  } else {
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.strokeStyle = 'rgba(0,0,0,1)';
+  }
+  ctx.beginPath();
+  ctx.moveTo(last.x, last.y);
+  ctx.lineTo(pos.x, pos.y);
+  ctx.stroke();
+  last = pos;
+});
+document.addEventListener('pointerup', ()=>{ drawing = false; });
 
-// --- 描画/消しゴム関数 ---
-
-function draw(e) {
-    if (!isDrawing) return; 
-
-    const ctx = layers[activeLayerIndex].ctx;
-    if (!ctx) return;
-
-    ctx.lineWidth = sizeSlider.value;
-    
-    if (drawMode === 'draw') {
-        ctx.globalCompositeOperation = 'source-over'; // 標準描画
-        ctx.strokeStyle = colorPicker.value;
-    } else { // 'erase' モード
-        // 修正点1: 消しゴム機能の修正 (destination-outで透明化)
-        ctx.globalCompositeOperation = 'destination-out'; 
-        ctx.strokeStyle = 'rgba(0,0,0,1)'; // 色は何でも良いが、このモードで透明化される
-    }
-
-    ctx.beginPath();
-    ctx.moveTo(lastX, lastY); 
-    
-    // 現在のマウス/ポインター位置を取得
-    const rect = layers[activeLayerIndex].canvas.getBoundingClientRect();
-    
-    // タッチイベントとマウスイベントの両方に対応
-    const clientX = (e.clientX !== undefined) ? e.clientX : e.touches[0].clientX;
-    const clientY = (e.clientY !== undefined) ? e.clientY : e.touches[0].clientY;
-
-    const currentX = clientX - rect.left;
-    const currentY = clientY - rect.top;
-
-    ctx.lineTo(currentX, currentY); 
-    ctx.stroke(); 
-
-    [lastX, lastY] = [currentX, currentY];
-}
-
-// --- イベントハンドラ ---
-
-function startDrawing(e) {
-    // アクティブでないキャンバスでの描画開始は無視
-    if (!e.target.classList.contains('active')) return; 
-
-    isDrawing = true;
-    e.preventDefault(); 
-    
-    const rect = layers[activeLayerIndex].canvas.getBoundingClientRect();
-    
-    const clientX = (e.clientX !== undefined) ? e.clientX : e.touches[0].clientX;
-    const clientY = (e.clientY !== undefined) ? e.clientY : e.touches[0].clientY;
-
-    lastX = clientX - rect.left;
-    lastY = clientY - rect.top;
-
-    draw(e); 
-}
-
-function stopDrawing() {
-    isDrawing = false;
-}
-
-// --- ツールモード切り替え ---
-
-function setToolMode(mode) {
-    drawMode = mode;
-    drawModeBtn.classList.remove('active');
-    eraserModeBtn.classList.remove('active');
-    
-    if (mode === 'draw') {
-        drawModeBtn.classList.add('active');
-        canvasContainer.style.cursor = 'crosshair';
-    } else {
-        eraserModeBtn.classList.add('active');
-        canvasContainer.style.cursor = 'cell';
-    }
-}
-
-// --- 画像保存機能の追加 ---
-
-function saveImage() {
-    // 1. レイヤーをすべて結合するための仮想キャンバスを作成
-    const finalCanvas = document.createElement('canvas');
-    finalCanvas.width = CANVAS_BASE_SIZE;
-    finalCanvas.height = CANVAS_BASE_SIZE;
-    const finalCtx = finalCanvas.getContext('2d');
-    
-    // 2. すべてのレイヤーを順番に仮想キャンバスに描画
-    const dpr = window.devicePixelRatio;
-    
-    layers.forEach(layer => {
-        // レイヤーキャンバスを仮想キャンバスに描画
-        finalCtx.drawImage(
-            layer.canvas, 
-            0, 0, 
-            layer.canvas.width, 
-            layer.canvas.height,
-            0, 0,
-            finalCanvas.width,
-            finalCanvas.height
-        );
-    });
-
-    // 3. データURLを取得し、ダウンロードリンクを作成
-    const imageURL = finalCanvas.toDataURL('image/png');
-    const a = document.createElement('a');
-    a.href = imageURL;
-    a.download = 'my_drawing.png';
-    
-    // 4. ダウンロードを実行
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    
-    finalCanvas.remove();
-}
-
-// --- イベントリスナーの設定 ---
-
-// ドキュメント全体にイベントリスナーを設定
-document.addEventListener('mousemove', draw);
-document.addEventListener('mouseup', stopDrawing);
-document.addEventListener('touchmove', draw);
-document.addEventListener('touchend', stopDrawing);
-document.addEventListener('touchcancel', stopDrawing);
-
-// キャンバスへの描画開始はアクティブキャンバスでのみ検知
-canvasContainer.addEventListener('mousedown', startDrawing);
-canvasContainer.addEventListener('touchstart', startDrawing);
-
-
-// ツールボタン
-drawModeBtn.addEventListener('click', () => setToolMode('draw'));
-eraserModeBtn.addEventListener('click', () => setToolMode('erase'));
-
-clearButton.addEventListener('click', () => {
-    // 修正点2: 「すべて消去」機能の修正 (背景レイヤー対応)
-    if (confirm('アクティブレイヤーの内容をすべて消去しますか？')) {
-        const activeLayer = layers[activeLayerIndex];
-        const ctx = activeLayer.ctx;
-        const width = CANVAS_BASE_SIZE;
-        const height = CANVAS_BASE_SIZE;
-        
-        // レイヤーを完全に透明にする (描画内容のみ消去)
-        ctx.clearRect(0, 0, width, height);
-        
-        // レイヤー0 (背景) の場合は、透明になった後に白で塗りつぶし直す
-        if (activeLayer.id === 0) {
-             ctx.fillStyle = '#fff';
-             ctx.fillRect(0, 0, width, height);
-        }
-    }
+// Tools
+penBtn.addEventListener('click', ()=>{
+  mode = 'draw';
+  penBtn.classList.add('active');
+  eraserBtn.classList.remove('active');
+});
+eraserBtn.addEventListener('click', ()=>{
+  mode = 'erase';
+  eraserBtn.classList.add('active');
+  penBtn.classList.remove('active');
 });
 
-saveButton.addEventListener('click', saveImage);
+addLayerBtn.addEventListener('click', ()=> addLayer());
+removeLayerBtn.addEventListener('click', ()=> {
+  if(confirm('レイヤーを削除しますか？')) removeLayer(activeIndex);
+});
+clearBtn.addEventListener('click', ()=> {
+  if(!confirm('アクティブレイヤーをクリアしますか？')) return;
+  const a = layers[activeIndex];
+  if(!a) return;
+  a.ctx.clearRect(0,0, a.canvas.width, a.canvas.height);
+});
 
-// レイヤーボタン
-addLayerBtn.addEventListener('click', () => addLayer(`レイヤー ${layers.length}`));
-removeLayerBtn.addEventListener('click', removeLayer);
+// Image paste via file input
+addImageBtn.addEventListener('click', ()=> fileInput.click());
+fileInput.addEventListener('change', (e)=>{
+  const f = e.target.files && e.target.files[0];
+  if(!f) return;
+  if(!f.type.startsWith('image/')) return;
+  const url = URL.createObjectURL(f);
+  pasteImageToActiveLayer(url);
+  // revoke later
+  setTimeout(()=>URL.revokeObjectURL(url), 20000);
+  fileInput.value = '';
+});
 
+// Drag & drop image onto container
+CANVAS_CONTAINER.addEventListener('dragover', (e)=>{ e.preventDefault(); });
+CANVAS_CONTAINER.addEventListener('drop', (e)=>{
+  e.preventDefault();
+  const file = e.dataTransfer.files && e.dataTransfer.files[0];
+  if(file && file.type.startsWith('image/')){
+    const url = URL.createObjectURL(file);
+    // compute drop position relative to active canvas and draw image with top-left at drop
+    pasteImageToActiveLayer(url, e.clientX, e.clientY);
+    setTimeout(()=>URL.revokeObjectURL(url), 20000);
+  }
+});
 
-// 初期化
-setToolMode('draw');
+// Draw image onto active layer canvas.
+// If drop coordinates provided, place image with its top-left at that position; otherwise center.
+function pasteImageToActiveLayer(url, clientX, clientY){
+  const active = layers[activeIndex];
+  if(!active) return;
+  const img = new Image();
+  img.onload = ()=>{
+    const canvas = active.canvas;
+    const rect = canvas.getBoundingClientRect();
+    let x = (rect.width - img.naturalWidth) / 2;
+    let y = (rect.height - img.naturalHeight) / 2;
+    if(clientX !== undefined && clientY !== undefined){
+      // convert client coords to canvas local
+      x = clientX - rect.left;
+      y = clientY - rect.top;
+    }
+    // ensure image fits — scale down if larger than canvas
+    let drawW = img.naturalWidth;
+    let drawH = img.naturalHeight;
+    const maxW = rect.width - x;
+    const maxH = rect.height - y;
+    if(drawW > maxW || drawH > maxH){
+      const ratio = Math.min(maxW / drawW, maxH / drawH, 1);
+      drawW *= ratio;
+      drawH *= ratio;
+    }
+    active.ctx.globalCompositeOperation = 'source-over';
+    active.ctx.drawImage(img, x, y, drawW, drawH);
+  };
+  img.crossOrigin = 'anonymous';
+  img.src = url;
+}
+
+// Save: composite all layers (in array order: bottom -> top)
+saveBtn.addEventListener('click', ()=>{
+  const rect = CANVAS_CONTAINER.getBoundingClientRect();
+  const w = Math.round(rect.width);
+  const h = Math.round(rect.height);
+  const out = document.createElement('canvas');
+  out.width = Math.round(w * DPR);
+  out.height = Math.round(h * DPR);
+  out.style.width = w + 'px';
+  out.style.height = h + 'px';
+  const outCtx = out.getContext('2d');
+  outCtx.scale(DPR, DPR);
+  // optional: white background
+  outCtx.fillStyle = '#ffffff';
+  outCtx.fillRect(0,0,w,h);
+  // draw in order
+  for(let i = 0; i < layers.length; i++){
+    outCtx.drawImage(layers[i].canvas, 0, 0, layers[i].canvas.width, layers[i].canvas.height, 0, 0, w, h);
+  }
+  const url = out.toDataURL('image/png');
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'drawing.png';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  out.remove();
+});
+
+// Resize handler: if container size changes, resize canvases while preserving drawing by raster copy
+let resizeTimeout = null;
+window.addEventListener('resize', ()=>{
+  clearTimeout(resizeTimeout);
+  resizeTimeout = setTimeout(() => {
+    const rect = CANVAS_CONTAINER.getBoundingClientRect();
+    const w = Math.max(10, Math.round(rect.width));
+    const h = Math.max(10, Math.round(rect.height));
+    layers.forEach(layer => {
+      // save pixels
+      const temp = document.createElement('canvas');
+      temp.width = layer.canvas.width;
+      temp.height = layer.canvas.height;
+      temp.getContext('2d').drawImage(layer.canvas, 0,0);
+      // resize canvas
+      layer.canvas.width = Math.round(w * DPR);
+      layer.canvas.height = Math.round(h * DPR);
+      layer.canvas.style.width = w + 'px';
+      layer.canvas.style.height = h + 'px';
+      layer.ctx.scale(DPR, DPR);
+      // draw back (simple stretch)
+      layer.ctx.drawImage(temp, 0,0, temp.width, temp.height, 0,0, w, h);
+    });
+  }, 120);
+});
+
+// Initialization: create two layers (background + drawing)
+function init(){
+  // ensure container has explicit size from CSS; if not, give default
+  const rect = CANVAS_CONTAINER.getBoundingClientRect();
+  if(rect.width === 0 || rect.height === 0){
+    CANVAS_CONTAINER.style.width = '600px';
+    CANVAS_CONTAINER.style.height = '600px';
+  }
+  addLayer('背景');
+  // fill background white
+  const bg = layers[0];
+  bg.ctx.fillStyle = '#ffffff';
+  bg.ctx.fillRect(0,0, bg.canvas.width / DPR, bg.canvas.height / DPR);
+
+  addLayer('レイヤー 1');
+  setActiveLayer(1);
+  refreshLayerList();
+}
+init();

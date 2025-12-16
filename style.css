@@ -1,150 +1,33 @@
-/* -------------------------
- * レイアウトとスタイル
- * ------------------------- */
-body {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    min-height: 100vh;
-    margin: 0;
-    padding: 20px;
-    background-color: #1a1a2e;
-    color: #fff;
-    font-family: system-ui, sans-serif;
+:root{
+  --bg:#0f1724;
+  --panel:#111827;
+  --accent:#e94560;
 }
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Meiryo,sans-serif;background:var(--bg);color:#fff}
+header{padding:18px;text-align:center}
+h1{margin:0;color:var(--accent);font-size:20px}
 
-h1 {
-    color: #e94560;
-    margin-bottom: 20px;
-}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:10px;background:rgba(255,255,255,0.03);border-radius:8px;margin:0 16px}
 
-/* メインコンテンツ (ツールバー、描画エリア) */
-.main-content {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-}
+.toolbar label{font-size:14px;display:flex;gap:6px;align-items:center}
+.toolbar button{background:#333;border:0;padding:8px 10px;border-radius:6px;color:#fff;cursor:pointer}
+.toolbar button.active{background:var(--accent);font-weight:700}
 
-/* 描画エリアとレイヤーパネルを横並びにするコンテナ */
-.drawing-area {
-    display: flex;
-    gap: 20px;
-    margin-top: 10px;
-}
-
-/* 描画キャンバスのコンテナ (レイヤーを重ねる場所) */
-.canvas-container {
-    position: relative;
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
-    border: 2px solid #533483;
-    border-radius: 8px;
-    max-width: 600px;
-}
-
-/* 描画キャンバス */
-.layer-canvas {
-    position: absolute; /* すべて重ねて配置 */
-    top: 0;
-    left: 0;
-    display: block;
-    cursor: crosshair;
-}
-
-/* 最上位のキャンバス (操作用) のみポインターイベントを有効にする */
-.layer-canvas:not(.active) {
-    pointer-events: none;
-}
-#layer_0 {
-    /* 常に一番下にあるレイヤー (白い背景として機能) */
-    z-index: 1; 
-}
-.layer-canvas {
-    z-index: 10;
-}
-
-/* ツールパネル */
-.toolbar {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 15px;
-    margin-bottom: 20px;
-    padding: 10px;
-    background: rgba(255, 255, 255, 0.1);
-    border-radius: 8px;
-}
-
-.toolbar label {
-    font-size: 14px;
-    display: flex;
-    align-items: center;
-    gap: 5px;
-}
-
-.toolbar button {
-    background-color: #533483;
-    color: #fff;
-    border: none;
-    padding: 8px 15px;
-    border-radius: 5px;
-    cursor: pointer;
-    transition: background-color 0.2s;
-}
-
-.toolbar button:hover {
-    background-color: #7a4a9f;
-}
-
-/* ツールのアクティブ状態 */
-.toolbar button.active {
-    background-color: #e94560;
-    font-weight: bold;
-}
+.workspace{display:flex;gap:16px;padding:16px;align-items:flex-start;max-width:1100px;margin:0 auto}
+.canvas-container{width:600px;height:600px;border-radius:8px;border:2px solid #2c2140;background:#fff;position:relative;overflow:hidden}
+.layer-canvas{position:absolute;left:0;top:0;user-select:none}
+.layer-canvas:not(.active){pointer-events:none;opacity:1}
 
 /* レイヤーパネル */
-.layer-panel {
-    width: 200px;
-    background: rgba(255, 255, 255, 0.1);
-    padding: 15px;
-    border-radius: 8px;
-}
+.layer-panel{width:220px;background:var(--panel);padding:12px;border-radius:8px}
+.layer-list{display:flex;flex-direction:column;gap:6px;max-height:600px;overflow:auto}
+.layer-item{padding:8px;border-radius:6px;background:rgba(255,255,255,0.04);cursor:pointer;display:flex;justify-content:space-between;align-items:center}
+.layer-item.selected{outline:2px solid var(--accent);background:rgba(233,69,96,0.06);font-weight:600}
 
-.layer-panel h2 {
-    font-size: 16px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.2);
-    padding-bottom: 5px;
-    margin-bottom: 10px;
-}
-
-.layer-list {
-    max-height: 300px;
-    overflow-y: auto;
-    margin-bottom: 10px;
-}
-
-.layer-item {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 8px;
-    margin-bottom: 5px;
-    background: rgba(255, 255, 255, 0.05);
-    border-radius: 4px;
-    cursor: pointer;
-}
-
-.layer-item.selected {
-    border: 2px solid #e94560;
-    background: rgba(233, 69, 96, 0.2);
-    font-weight: bold;
-}
-
-.layer-controls button {
-    width: 48%;
-    padding: 6px;
-}
-
-/* レイヤーキャンバスが追加されると、コンテナのサイズを確定させるためのスタイル */
-.canvas-container:has(canvas) {
-    /* ここはJSで設定するためCSSでの固定はしない */
+/* レスポンシブ */
+@media (max-width:900px){
+  .workspace{flex-direction:column;align-items:center}
+  .canvas-container{width:90vw;height:90vw}
+  .layer-panel{width:90vw}
 }
