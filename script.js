@@ -1,7 +1,11 @@
-// Minimal, working painter with multiple canvas layers.
-// Features: add/remove/select layer, draw/erase on active layer, paste image to active layer, save PNG.
-// Keep code minimal and clear.
+// script.js — Minimal & working painter with movable/scalable images
+// Requires the Minimal HTML/CSS version you already have.
 
+'use strict';
+
+/* -------------------------
+   DOM references
+   ------------------------- */
 const CANVAS_CONTAINER = document.getElementById('canvasContainer');
 const colorPicker = document.getElementById('colorPicker');
 const sizeSlider = document.getElementById('sizeSlider');
@@ -13,115 +17,151 @@ const clearBtn = document.getElementById('clearBtn');
 const saveBtn = document.getElementById('saveBtn');
 const fileInput = document.getElementById('fileInput');
 const addImageBtn = document.getElementById('addImageBtn');
-
 const layerListEl = document.getElementById('layerList');
 
 const DPR = window.devicePixelRatio || 1;
-let layers = []; // [{id, canvas, ctx, name}]
-let activeIndex = 0;
-let mode = 'draw'; // 'draw' or 'erase'
-let drawing = false;
-let last = {x:0,y:0};
 
-// Ensure container has size (CSS sets it), but track rect for canvas sizing
-function createCanvasElement(widthPx, heightPx){
-  const c = document.createElement('canvas');
-  // size in device pixels
-  c.width = Math.round(widthPx * DPR);
-  c.height = Math.round(heightPx * DPR);
-  c.style.width = widthPx + 'px';
-  c.style.height = heightPx + 'px';
-  const ctx = c.getContext('2d');
+/* -------------------------
+   App state
+   layers: array from bottom(0) -> top(last)
+   each layer: { id, name, wrapper(div), canvas, ctx, images: [{imgEl, x, y, scale}] }
+   activeIndex: index in layers array
+   ------------------------- */
+let layers = [];
+let activeIndex = 0;
+let toolMode = 'draw'; // 'draw' | 'erase'
+let isDrawing = false;
+let lastPos = { x: 0, y: 0 };
+
+/* -------------------------
+   Helpers
+   ------------------------- */
+function getContainerSizeCss() {
+  const r = CANVAS_CONTAINER.getBoundingClientRect();
+  return { w: Math.max(10, Math.round(r.width)), h: Math.max(10, Math.round(r.height)) };
+}
+
+function createCanvasForSize(wCss, hCss) {
+  const canvas = document.createElement('canvas');
+  // device pixels
+  canvas.width = Math.round(wCss * DPR);
+  canvas.height = Math.round(hCss * DPR);
+  canvas.style.width = wCss + 'px';
+  canvas.style.height = hCss + 'px';
+  canvas.className = 'layer-canvas';
+  const ctx = canvas.getContext('2d');
   ctx.scale(DPR, DPR);
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
-  return { canvas: c, ctx };
+  return { canvas, ctx };
 }
 
-function addLayer(name = `レイヤー ${layers.length}`){
-  const rect = CANVAS_CONTAINER.getBoundingClientRect();
-  const width = Math.max(10, Math.round(rect.width));
-  const height = Math.max(10, Math.round(rect.height));
-  const {canvas, ctx} = createCanvasElement(width, height);
-  canvas.className = 'layer-canvas';
-  canvas.dataset.layer = layers.length;
-  canvas.style.zIndex = layers.length; // stacking order
-  CANVAS_CONTAINER.appendChild(canvas);
-  layers.push({ id: layers.length, canvas, ctx, name });
+function setActiveLayer(index) {
+  if (index < 0 || index >= layers.length) return;
+  activeIndex = index;
+  // update CSS / pointer-events
+  layers.forEach((L, i) => {
+    L.wrapper.dataset.index = i;
+    L.canvas.classList.toggle('active', i === activeIndex);
+    // image pointer-events: only active layer's images accept pointer
+    L.images.forEach(imgObj => {
+      imgObj.imgEl.style.pointerEvents = (i === activeIndex) ? 'auto' : 'none';
+    });
+    // wrapper top stacking
+    L.wrapper.style.zIndex = i;
+  });
+  refreshLayerList();
+}
+
+/* -------------------------
+   UI: layer list
+   ------------------------- */
+function refreshLayerList() {
+  layerListEl.innerHTML = '';
+  // Display top-first so user sees top layer on top
+  for (let i = layers.length - 1; i >= 0; i--) {
+    const arrIdx = i;
+    const item = document.createElement('div');
+    item.className = 'layer-item' + (arrIdx === activeIndex ? ' selected' : '');
+    item.textContent = layers[arrIdx].name;
+    item.addEventListener('click', () => setActiveLayer(arrIdx));
+    layerListEl.appendChild(item);
+  }
+  removeLayerBtn.disabled = layers.length <= 1;
+}
+
+/* -------------------------
+   Create / remove layers
+   ------------------------- */
+function addLayer(name = `レイヤー ${layers.length}`) {
+  const size = getContainerSizeCss();
+  const wrapper = document.createElement('div');
+  wrapper.className = 'layer-wrapper';
+  wrapper.style.position = 'absolute';
+  wrapper.style.left = '0';
+  wrapper.style.top = '0';
+  wrapper.style.width = '100%';
+  wrapper.style.height = '100%';
+  wrapper.style.pointerEvents = 'auto';
+
+  const { canvas, ctx } = createCanvasForSize(size.w, size.h);
+  canvas.style.position = 'absolute';
+  canvas.style.left = '0';
+  canvas.style.top = '0';
+
+  wrapper.appendChild(canvas);
+  CANVAS_CONTAINER.appendChild(wrapper);
+
+  const layerObj = { id: layers.length, name, wrapper, canvas, ctx, images: [] };
+  layers.push(layerObj);
+
   setActiveLayer(layers.length - 1);
   refreshLayerList();
-  removeLayerBtn.disabled = layers.length <= 1;
 }
 
-function removeLayer(index){
-  if(layers.length <= 1) return;
+function removeLayer(index) {
+  if (layers.length <= 1) return;
   const L = layers[index];
-  CANVAS_CONTAINER.removeChild(L.canvas);
-  layers.splice(index,1);
-  // adjust zIndex and dataset
-  layers.forEach((l, i)=>{
-    l.canvas.dataset.layer = i;
-    l.canvas.style.zIndex = i;
+  CANVAS_CONTAINER.removeChild(L.wrapper);
+  layers.splice(index, 1);
+  // reindex and re-zIndex
+  layers.forEach((l, i) => {
+    l.id = i;
+    l.wrapper.style.zIndex = i;
   });
-  if(activeIndex >= layers.length) activeIndex = layers.length -1;
+  if (activeIndex >= layers.length) activeIndex = layers.length - 1;
   setActiveLayer(activeIndex);
   refreshLayerList();
-  removeLayerBtn.disabled = layers.length <= 1;
 }
 
-function setActiveLayer(index){
-  if(index < 0 || index >= layers.length) return;
-  activeIndex = index;
-  layers.forEach((l,i)=>{
-    l.canvas.classList.toggle('active', i === activeIndex);
-  });
-  refreshLayerList();
-}
-
-// Update layer list UI
-function refreshLayerList(){
-  layerListEl.innerHTML = '';
-  // show top-to-bottom (last array element is top)
-  for(let i = layers.length - 1; i >= 0; i--){
-    const li = document.createElement('div');
-    li.className = 'layer-item' + (i === activeIndex ? ' selected' : '');
-    li.textContent = layers[i].name;
-    li.addEventListener('click', ()=> {
-      // When clicked in list, index from top -> convert
-      const idxFromTop = i;
-      // array index is same as i here because we iterated from end; compute actual index:
-      const idx = i;
-      setActiveLayer(idx);
-    });
-    layerListEl.appendChild(li);
-  }
-}
-
-// Get pointer coords relative to active canvas (CSS pixels)
-function getLocalPos(e, canvas){
-  const rect = canvas.getBoundingClientRect();
-  const clientX = (e.clientX !== undefined) ? e.clientX : (e.touches && e.touches[0] && e.touches[0].clientX) || 0;
-  const clientY = (e.clientY !== undefined) ? e.clientY : (e.touches && e.touches[0] && e.touches[0].clientY) || 0;
+/* -------------------------
+   Drawing (pen / erase)
+   global pointer handlers — draw only when pointer on active canvas
+   ------------------------- */
+function getLocalPos(e, element) {
+  const rect = element.getBoundingClientRect();
+  const clientX = e.clientX !== undefined ? e.clientX : (e.touches && e.touches[0] && e.touches[0].clientX) || 0;
+  const clientY = e.clientY !== undefined ? e.clientY : (e.touches && e.touches[0] && e.touches[0].clientY) || 0;
   return { x: clientX - rect.left, y: clientY - rect.top };
 }
 
-// Drawing handlers (global)
-document.addEventListener('pointerdown', (e)=>{
+document.addEventListener('pointerdown', (e) => {
   const active = layers[activeIndex];
-  if(!active) return;
-  if(e.target !== active.canvas) return; // only draw when pointer is on active canvas
-  drawing = true;
-  last = getLocalPos(e, active.canvas);
+  if (!active) return;
+  if (e.target !== active.canvas) return;
+  isDrawing = true;
+  lastPos = getLocalPos(e, active.canvas);
   e.preventDefault();
 });
-document.addEventListener('pointermove', (e)=>{
-  if(!drawing) return;
+
+document.addEventListener('pointermove', (e) => {
+  if (!isDrawing) return;
   const active = layers[activeIndex];
-  if(!active) return;
+  if (!active) return;
   const pos = getLocalPos(e, active.canvas);
   const ctx = active.ctx;
   ctx.lineWidth = Number(sizeSlider.value);
-  if(mode === 'draw'){
+  if (toolMode === 'draw') {
     ctx.globalCompositeOperation = 'source-over';
     ctx.strokeStyle = colorPicker.value;
   } else {
@@ -129,97 +169,196 @@ document.addEventListener('pointermove', (e)=>{
     ctx.strokeStyle = 'rgba(0,0,0,1)';
   }
   ctx.beginPath();
-  ctx.moveTo(last.x, last.y);
+  ctx.moveTo(lastPos.x, lastPos.y);
   ctx.lineTo(pos.x, pos.y);
   ctx.stroke();
-  last = pos;
-});
-document.addEventListener('pointerup', ()=>{ drawing = false; });
-
-// Tools
-penBtn.addEventListener('click', ()=>{
-  mode = 'draw';
-  penBtn.classList.add('active');
-  eraserBtn.classList.remove('active');
-});
-eraserBtn.addEventListener('click', ()=>{
-  mode = 'erase';
-  eraserBtn.classList.add('active');
-  penBtn.classList.remove('active');
+  lastPos = pos;
 });
 
-addLayerBtn.addEventListener('click', ()=> addLayer());
-removeLayerBtn.addEventListener('click', ()=> {
-  if(confirm('レイヤーを削除しますか？')) removeLayer(activeIndex);
-});
-clearBtn.addEventListener('click', ()=> {
-  if(!confirm('アクティブレイヤーをクリアしますか？')) return;
-  const a = layers[activeIndex];
-  if(!a) return;
-  a.ctx.clearRect(0,0, a.canvas.width, a.canvas.height);
+document.addEventListener('pointerup', () => {
+  isDrawing = false;
 });
 
-// Image paste via file input
-addImageBtn.addEventListener('click', ()=> fileInput.click());
-fileInput.addEventListener('change', (e)=>{
+/* -------------------------
+   Image management per-layer
+   Each image: { imgEl, x, y, scale }
+   Image DOM sits inside layer.wrapper on top of canvas,
+   and is transformed via CSS transform: translate(x,y) scale(s)
+   ------------------------- */
+function createImageObject(url, dropClientX, dropClientY) {
+  const active = layers[activeIndex];
+  if (!active) return;
+  const rect = CANVAS_CONTAINER.getBoundingClientRect();
+
+  const imgEl = document.createElement('img');
+  imgEl.draggable = false;
+  imgEl.style.position = 'absolute';
+  imgEl.style.left = '0';
+  imgEl.style.top = '0';
+  imgEl.style.transformOrigin = 'top left';
+  imgEl.style.willChange = 'transform';
+  imgEl.style.cursor = 'move';
+  imgEl.style.maxWidth = 'none';
+  imgEl.style.maxHeight = 'none';
+  imgEl.style.pointerEvents = (activeIndex === layers.indexOf(active)) ? 'auto' : 'none';
+
+  const state = {
+    imgEl,
+    x: rect.width / 2,
+    y: rect.height / 2,
+    scale: 1
+  };
+
+  if (typeof dropClientX === 'number' && typeof dropClientY === 'number') {
+    state.x = dropClientX - rect.left;
+    state.y = dropClientY - rect.top;
+  }
+
+  imgEl.onload = () => {
+    // If image larger than container, scale down to fit
+    const naturalW = imgEl.naturalWidth;
+    const naturalH = imgEl.naturalHeight;
+    const maxW = rect.width * 0.9;
+    const maxH = rect.height * 0.9;
+    let startScale = 1;
+    if (naturalW > maxW || naturalH > maxH) {
+      startScale = Math.min(maxW / naturalW, maxH / naturalH, 1);
+    }
+    state.scale = startScale;
+    // center image around (x,y) by offsetting half of displayed width/height
+    // we'll treat state.x/state.y as the top-left of the displayed image (consistent)
+    updateImageTransform(state);
+  };
+
+  active.wrapper.appendChild(imgEl);
+  active.images.push(state);
+
+  makeImageInteractive(state);
+  imgEl.src = url;
+  return state;
+}
+
+function updateImageTransform(state) {
+  // apply CSS transform for pixel-perfect placement (CSS pixels)
+  state.imgEl.style.transform = `translate(${state.x}px, ${state.y}px) scale(${state.scale})`;
+}
+
+/* pointer + wheel + pinch handlers for an image state */
+function makeImageInteractive(state) {
+  const img = state.imgEl;
+  let dragging = false;
+  let start = { x: 0, y: 0 };
+  let base = { x: 0, y: 0 };
+
+  // For pinch/zoom support we track pointers
+  const pointers = new Map();
+  let basePinchDistance = null;
+  let basePinchScale = 1;
+
+  img.addEventListener('pointerdown', (e) => {
+    // ensure image is manipulated only on active layer
+    const active = layers[activeIndex];
+    if (!active || active.wrapper !== img.parentElement) return;
+
+    img.setPointerCapture(e.pointerId);
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (pointers.size === 1) {
+      dragging = true;
+      start = { x: e.clientX, y: e.clientY };
+      base = { x: state.x, y: state.y };
+    } else if (pointers.size === 2) {
+      // setup pinch initial values
+      const pts = Array.from(pointers.values());
+      basePinchDistance = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+      basePinchScale = state.scale;
+    }
+    e.preventDefault();
+  });
+
+  img.addEventListener('pointermove', (e) => {
+    if (!pointers.has(e.pointerId)) return;
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (pointers.size === 1 && dragging) {
+      // single pointer drag
+      const dx = e.clientX - start.x;
+      const dy = e.clientY - start.y;
+      state.x = base.x + dx;
+      state.y = base.y + dy;
+      updateImageTransform(state);
+    } else if (pointers.size === 2) {
+      // pinch to zoom
+      const pts = Array.from(pointers.values());
+      const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+      if (basePinchDistance && basePinchDistance > 0) {
+        const ratio = dist / basePinchDistance;
+        state.scale = Math.max(0.05, basePinchScale * ratio);
+        updateImageTransform(state);
+      }
+    }
+  });
+
+  img.addEventListener('pointerup', (e) => {
+    pointers.delete(e.pointerId);
+    if (pointers.size === 0) {
+      dragging = false;
+      basePinchDistance = null;
+      basePinchScale = state.scale;
+    }
+    try { img.releasePointerCapture(e.pointerId); } catch (err) {}
+  });
+
+  img.addEventListener('pointercancel', (e) => {
+    pointers.delete(e.pointerId);
+    dragging = false;
+    basePinchDistance = null;
+  });
+
+  // wheel to zoom (desktop)
+  img.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const delta = e.deltaY < 0 ? 1.08 : 0.92;
+    state.scale = Math.max(0.05, state.scale * delta);
+    updateImageTransform(state);
+  }, { passive: false });
+
+  // ensure images only handle pointer if their layer is active; update on layer change
+  // (the setActiveLayer function toggles pointer-events appropriately)
+}
+
+/* -------------------------
+   Paste / drop handlers
+   ------------------------- */
+addImageBtn.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', (e) => {
   const f = e.target.files && e.target.files[0];
-  if(!f) return;
-  if(!f.type.startsWith('image/')) return;
+  if (!f) return;
+  if (!f.type.startsWith('image/')) return;
   const url = URL.createObjectURL(f);
-  pasteImageToActiveLayer(url);
+  createImageObject(url);
   // revoke later
-  setTimeout(()=>URL.revokeObjectURL(url), 20000);
+  setTimeout(() => URL.revokeObjectURL(url), 20000);
   fileInput.value = '';
 });
 
-// Drag & drop image onto container
-CANVAS_CONTAINER.addEventListener('dragover', (e)=>{ e.preventDefault(); });
-CANVAS_CONTAINER.addEventListener('drop', (e)=>{
+CANVAS_CONTAINER.addEventListener('dragover', (e) => { e.preventDefault(); });
+CANVAS_CONTAINER.addEventListener('drop', (e) => {
   e.preventDefault();
   const file = e.dataTransfer.files && e.dataTransfer.files[0];
-  if(file && file.type.startsWith('image/')){
+  if (file && file.type && file.type.startsWith('image/')) {
     const url = URL.createObjectURL(file);
-    // compute drop position relative to active canvas and draw image with top-left at drop
-    pasteImageToActiveLayer(url, e.clientX, e.clientY);
-    setTimeout(()=>URL.revokeObjectURL(url), 20000);
+    createImageObject(url, e.clientX, e.clientY);
+    setTimeout(() => URL.revokeObjectURL(url), 20000);
   }
 });
 
-// Draw image onto active layer canvas.
-// If drop coordinates provided, place image with its top-left at that position; otherwise center.
-function pasteImageToActiveLayer(url, clientX, clientY){
-  const active = layers[activeIndex];
-  if(!active) return;
-  const img = new Image();
-  img.onload = ()=>{
-    const canvas = active.canvas;
-    const rect = canvas.getBoundingClientRect();
-    let x = (rect.width - img.naturalWidth) / 2;
-    let y = (rect.height - img.naturalHeight) / 2;
-    if(clientX !== undefined && clientY !== undefined){
-      // convert client coords to canvas local
-      x = clientX - rect.left;
-      y = clientY - rect.top;
-    }
-    // ensure image fits — scale down if larger than canvas
-    let drawW = img.naturalWidth;
-    let drawH = img.naturalHeight;
-    const maxW = rect.width - x;
-    const maxH = rect.height - y;
-    if(drawW > maxW || drawH > maxH){
-      const ratio = Math.min(maxW / drawW, maxH / drawH, 1);
-      drawW *= ratio;
-      drawH *= ratio;
-    }
-    active.ctx.globalCompositeOperation = 'source-over';
-    active.ctx.drawImage(img, x, y, drawW, drawH);
-  };
-  img.crossOrigin = 'anonymous';
-  img.src = url;
-}
-
-// Save: composite all layers (in array order: bottom -> top)
-saveBtn.addEventListener('click', ()=>{
+/* -------------------------
+   Export: composite all layers -> PNG
+   Draw order: bottom -> top
+   For each layer: draw canvas, then rasterize images at (x,y) with scale
+   ------------------------- */
+function exportPNG() {
   const rect = CANVAS_CONTAINER.getBoundingClientRect();
   const w = Math.round(rect.width);
   const h = Math.round(rect.height);
@@ -230,65 +369,146 @@ saveBtn.addEventListener('click', ()=>{
   out.style.height = h + 'px';
   const outCtx = out.getContext('2d');
   outCtx.scale(DPR, DPR);
-  // optional: white background
+  // optional white background
   outCtx.fillStyle = '#ffffff';
-  outCtx.fillRect(0,0,w,h);
-  // draw in order
-  for(let i = 0; i < layers.length; i++){
-    outCtx.drawImage(layers[i].canvas, 0, 0, layers[i].canvas.width, layers[i].canvas.height, 0, 0, w, h);
-  }
-  const url = out.toDataURL('image/png');
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'drawing.png';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  out.remove();
-});
+  outCtx.fillRect(0, 0, w, h);
 
-// Resize handler: if container size changes, resize canvases while preserving drawing by raster copy
-let resizeTimeout = null;
-window.addEventListener('resize', ()=>{
-  clearTimeout(resizeTimeout);
-  resizeTimeout = setTimeout(() => {
-    const rect = CANVAS_CONTAINER.getBoundingClientRect();
-    const w = Math.max(10, Math.round(rect.width));
-    const h = Math.max(10, Math.round(rect.height));
-    layers.forEach(layer => {
-      // save pixels
-      const temp = document.createElement('canvas');
-      temp.width = layer.canvas.width;
-      temp.height = layer.canvas.height;
-      temp.getContext('2d').drawImage(layer.canvas, 0,0);
-      // resize canvas
-      layer.canvas.width = Math.round(w * DPR);
-      layer.canvas.height = Math.round(h * DPR);
-      layer.canvas.style.width = w + 'px';
-      layer.canvas.style.height = h + 'px';
-      layer.ctx.scale(DPR, DPR);
-      // draw back (simple stretch)
-      layer.ctx.drawImage(temp, 0,0, temp.width, temp.height, 0,0, w, h);
+  // draw each layer in order
+  (function drawLayer(i) {
+    if (i >= layers.length) {
+      // done -> download
+      const url = out.toDataURL('image/png');
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'drawing.png';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      out.remove();
+      return;
+    }
+    const L = layers[i];
+    // draw canvas (the source canvas is in device pixels)
+    outCtx.drawImage(L.canvas, 0, 0, L.canvas.width, L.canvas.height, 0, 0, w, h);
+
+    // then draw images placed on the layer (if any)
+    const imgs = L.images;
+    if (!imgs || imgs.length === 0) {
+      drawLayer(i + 1);
+      return;
+    }
+
+    // draw images sequentially (load from imgEl.src may be immediate since already loaded)
+    let loaded = 0;
+    imgs.forEach((imgState) => {
+      const src = imgState.imgEl.src;
+      const raster = new Image();
+      raster.crossOrigin = 'anonymous';
+      raster.onload = () => {
+        const drawW = raster.naturalWidth * imgState.scale;
+        const drawH = raster.naturalHeight * imgState.scale;
+        outCtx.drawImage(raster, imgState.x, imgState.y, drawW, drawH);
+        loaded++;
+        if (loaded === imgs.length) drawLayer(i + 1);
+      };
+      raster.onerror = () => {
+        // skip problematic image
+        loaded++;
+        if (loaded === imgs.length) drawLayer(i + 1);
+      };
+      raster.src = src;
     });
-  }, 120);
+  })(0);
+}
+
+/* -------------------------
+   Resize handling
+   Maintain pixel content by copying to temp canvas, then resizing and drawing back
+   ------------------------- */
+let resizeTimer = null;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => {
+    const size = getContainerSizeCss();
+    layers.forEach((L) => {
+      // save current pixels
+      const tmp = document.createElement('canvas');
+      tmp.width = L.canvas.width;
+      tmp.height = L.canvas.height;
+      tmp.getContext('2d').drawImage(L.canvas, 0, 0);
+
+      // resize canvas to new device pixels
+      L.canvas.width = Math.round(size.w * DPR);
+      L.canvas.height = Math.round(size.h * DPR);
+      L.canvas.style.width = size.w + 'px';
+      L.canvas.style.height = size.h + 'px';
+
+      // reset ctx scale and draw previous (stretched)
+      L.ctx = L.canvas.getContext('2d');
+      L.ctx.scale(DPR, DPR);
+      L.ctx.drawImage(tmp, 0, 0, tmp.width, tmp.height, 0, 0, size.w, size.h);
+    });
+    // images are placed in CSS pixels; they stay visually in place
+  }, 150);
 });
 
-// Initialization: create two layers (background + drawing)
-function init(){
-  // ensure container has explicit size from CSS; if not, give default
+/* -------------------------
+   Tool buttons
+   ------------------------- */
+penBtn.addEventListener('click', () => {
+  toolMode = 'draw';
+  penBtn.classList.add('active');
+  eraserBtn.classList.remove('active');
+});
+
+eraserBtn.addEventListener('click', () => {
+  toolMode = 'erase';
+  eraserBtn.classList.add('active');
+  penBtn.classList.remove('active');
+});
+
+addLayerBtn.addEventListener('click', () => addLayer());
+removeLayerBtn.addEventListener('click', () => {
+  if (confirm('レイヤーを削除しますか？')) removeLayer(activeIndex);
+});
+
+clearBtn.addEventListener('click', () => {
+  if (!confirm('アクティブレイヤーをクリアしますか？')) return;
+  const L = layers[activeIndex];
+  if (!L) return;
+  L.ctx.clearRect(0, 0, L.canvas.width, L.canvas.height);
+});
+
+saveBtn.addEventListener('click', exportPNG);
+
+/* -------------------------
+   Init: create background + one drawing layer
+   ------------------------- */
+function init() {
+  // ensure container has CSS size (fallback if not)
   const rect = CANVAS_CONTAINER.getBoundingClientRect();
-  if(rect.width === 0 || rect.height === 0){
+  if (rect.width === 0 || rect.height === 0) {
     CANVAS_CONTAINER.style.width = '600px';
     CANVAS_CONTAINER.style.height = '600px';
   }
+  // background layer
   addLayer('背景');
   // fill background white
   const bg = layers[0];
   bg.ctx.fillStyle = '#ffffff';
-  bg.ctx.fillRect(0,0, bg.canvas.width / DPR, bg.canvas.height / DPR);
+  bg.ctx.fillRect(0, 0, bg.canvas.width / DPR, bg.canvas.height / DPR);
 
+  // drawing layer
   addLayer('レイヤー 1');
   setActiveLayer(1);
   refreshLayerList();
 }
+
 init();
+
+/* -------------------------
+   Expose createImageObject for external use (optional)
+   ------------------------- */
+window.__createImageOnActiveLayer = function (url) {
+  return createImageObject(url);
+};
